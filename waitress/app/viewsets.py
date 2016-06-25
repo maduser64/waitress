@@ -103,36 +103,32 @@ class UserViewSet(viewsets.ViewSet):
         user = get_object_or_404(self.queryset, slack_id=slack_id)
         meal_in_progress = MealSession.in_progress()
         content = {'firstname': user.firstname, 'lastname': user.lastname}
+
         if not meal_in_progress:
             content['status'] = 'There is no meal in progress'
             return Response(
                 content, status=status_code.HTTP_406_NOT_ACCEPTABLE
             )
 
-        else:
-            before_midday = Time.is_before_midday()
-            if user.is_tapped():
-                content['status'] = 'User has tapped in for {0}'.format(
-                    'breakfast' if before_midday else 'lunch'
-                )
-                return Response(
-                    content, status=status_code.HTTP_400_BAD_REQUEST
-                )
-            date_today = meal_in_progress[0].date
-            mealservice = MealService.objects.filter(
-                user=user, date=date_today
+        before_midday = Time.is_before_midday()
+        if user.is_tapped():
+            content['status'] = 'User has tapped in for {0}'.format(
+                'breakfast' if before_midday else 'lunch'
             )
+            return Response(
+                content, status=status_code.HTTP_400_BAD_REQUEST
+            )
+        date_today = meal_in_progress[0].date
+        mealservice = MealService.objects.filter(
+            user=user, date=date_today
+        )
 
-            if not mealservice.count():
-                mealservice = MealService()
-            else:
-                mealservice = mealservice[0]
+        mealservice = mealservice[0] if mealservice.count() else MealService()
+        mealservice = mealservice.set_meal(before_midday)
+        mealservice = mealservice.set_user_and_date(user, date_today)
+        mealservice.save()
 
-            mealservice = mealservice.set_meal(before_midday)
-            mealservice = mealservice.set_user_and_date(user, date_today)
-            mealservice.save()
-
-            content['status'] = 'Tap was successful'
+        content['status'] = 'Tap was successful'
 
         return Response(content, status=status_code.HTTP_200_OK)
 
@@ -156,14 +152,11 @@ class UserViewSet(viewsets.ViewSet):
             content['status'] = 'There is no meal in progress'
         else:
             mealservice = mealservice.set_meal(before_midday, reverse=True)
-            if not mealservice.untapped:
-                untapped = []
-            else:
-                untapped = json.loads(mealservice.untapped)
+            untapped = [] if not mealservice.untapped else json.loads(mealservice.untapped)
             log = {
-                    'date_untapped': str(timenow),
-                    'user': request.passphrase.user.id
-                }
+                'date_untapped': str(timenow),
+                'user': request.passphrase.user.id
+            }
             untapped.append(log)
             mealservice.untapped = untapped
             mealservice.date_modified = timenow

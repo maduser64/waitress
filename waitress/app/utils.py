@@ -41,7 +41,6 @@ class UserRepository(object):
         """Generates unique id for a user type.
         """
         dict_ids = {}
-        print user_type
         uc_first_letter = user_type[0].upper()
         alphabet = string.uppercase + string.digits
 
@@ -112,14 +111,11 @@ class UserRepository(object):
             cls.user_queryset = SlackUser.objects.all()
             difference = cls.difference(members, cls.user_queryset)
 
-            if len(difference):
-                # get user info
-                if user_info.successful:
-                    return cls.filter_add_user(
-                        user_info.body['members'], difference, trim
-                    )
-            else:
-                return "Users list wasn't changed."
+        if len(difference) and user_info.successful:
+            return cls.filter_add_user(
+                user_info.body['members'], difference, trim
+            )
+        return "Users list wasn't changed."
 
     @classmethod
     def difference(cls, repo_users, db_users):
@@ -151,16 +147,16 @@ class UserRepository(object):
             user_dict = {}
             not_user_list = []
             for item in info:
-                if 'deleted' in item and item['deleted'] is True:
+                if item.get('deleted', False):
                     not_user_list.append(item['id'])
                     continue
-                if 'is_bot' in item and item['is_bot'] is True:
+                if item.get('is_bot', False):
                     not_user_list.append(item['id'])
                     continue
-                if 'image_original' not in item['profile']:  # why you should do as ladisays. =)
+                if not item['profile'].get('image_original', None):  # why you should do as ladisays. =)
                     not_user_list.append(item['id'])
                     continue
-                if 'email' not in item['profile']:
+                if not item['profile'].get('email', None):
                     not_user_list.append(item['id'])
                     continue
 
