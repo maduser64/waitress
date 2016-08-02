@@ -49,9 +49,7 @@ class UserRepository(object):
             dict_ids[i] = True  # make a dictionary of ids for quick lookup.
 
         def gen_id():  # generate 8-char id.
-            return "{0}{1}".format(
-                uc_first_letter,
-                ''.join([random.choice(alphabet) for _ in range(8)]))
+            return "{0}{1}".format(uc_first_letter, ''.join([random.choice(alphabet) for _ in range(8)]))
 
         new_id = gen_id()
 
@@ -76,14 +74,7 @@ class UserRepository(object):
             last_guest = filter(lambda x: x.firstname.startswith("Guest"),
                                 list(users))[-1] if len(users) else None
 
-            if not last_guest:
-                username = kwargs.get("name", "Guest 1")
-            else:
-                last_num = int(
-                    re.match("^Guest ([\d]*)".format(), last_guest.firstname).groups()[0])
-
-                username = 'Guest {}'.format(last_num + 1)
-
+            username = kwargs.get("name", "Guest 1") if not last_guest else 'Guest {}'.format(int(re.match("^Guest ([\d]*)".format(), last_guest.firstname).groups()[0]) + 1)
             user = SlackUser(firstname=username)
 
         user.slack_id = cls.generate_unique(
@@ -113,14 +104,15 @@ class UserRepository(object):
             cls.user_queryset = SlackUser.objects.all()
             difference = cls.difference(members, cls.user_queryset)
 
-            if len(difference):
-                # get user info
-                if user_info.successful:
-                    return cls.filter_add_user(
-                        user_info.body['members'], difference, trim
-                    )
-            else:
+            if not len(difference):
                 return "Users list wasn't changed."
+            # get user info
+            if user_info.successful:
+                return cls.filter_add_user(
+                    user_info.body['members'], difference, trim
+                )
+
+
 
     @classmethod
     def difference(cls, repo_users, db_users):

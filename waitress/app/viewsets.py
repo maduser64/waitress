@@ -30,14 +30,10 @@ class UserViewSet(viewsets.ViewSet):
               paramType: query
         """
         filter = request.GET.get('filter')
-        queryset = self.queryset
-
-        if request.GET.get('filter'):
-            queryset = queryset.filter(
+        queryset = self.queryset.filter(
                 firstname__startswith=filter
-            ).order_by('firstname')
-        else:
-            queryset = queryset.all().order_by('id')
+        ).order_by('firstname') if filter else self.queryset.all().order_by('id')
+
         serializer = UserSerializer(queryset, many=True)
 
         return Response(serializer.data, status_code.HTTP_200_OK)
@@ -82,18 +78,14 @@ class UserViewSet(viewsets.ViewSet):
         status = UserRepository.regularize_guests()
         content = {"status": status}
 
-        return Response(
-            content, status=status_code.HTTP_200_OK if status else 500)
+        return Response(content, status=status_code.HTTP_200_OK if status else 500)
 
     @list_route(methods=['get'], url_path='remove-old-friends')
     def trim_users(self, request):
         """
         A method that trims the list of users.
         """
-        status = UserRepository.update(trim=True)
-        content = {"status": status}
-
-        return Response(content, status=status_code.HTTP_200_OK)
+        return Response({"status": (UserRepository.update(trim=True))}, status=status_code.HTTP_200_OK)
 
     @guard
     @list_route(methods=['post'], url_path='add')
@@ -142,45 +134,34 @@ class UserViewSet(viewsets.ViewSet):
               type: string
               paramType: form
         """
-        slack_id = request.POST.get('slackUserId')
-
-        if not slack_id:
+        if not request.POST.get('slackUserId'):
             content = {'status': 'You\'re  unauthorized to make this request'}
             return Response(content, status=status_code.HTTP_401_UNAUTHORIZED)
 
-        user = get_object_or_404(self.queryset, slack_id=slack_id)
-        meal_in_progress = MealSession.in_progress()
+        user = get_object_or_404(self.queryset, slack_id=(request.POST.get('slackUserId')))
         content = {'firstname': user.firstname, 'lastname': user.lastname}
-        if not meal_in_progress:
+
+        if not MealSession.in_progress():
             content['status'] = 'There is no meal in progress'
             return Response(
-                content, status=status_code.HTTP_406_NOT_ACCEPTABLE
+                    content, status=status_code.HTTP_406_NOT_ACCEPTABLE
             )
 
-        else:
-            before_midday = Time.is_before_midday()
-            if user.is_tapped():
-                content['status'] = 'User has tapped in for {0}'.format(
-                    'breakfast' if before_midday else 'lunch'
-                )
-                return Response(
-                    content, status=status_code.HTTP_400_BAD_REQUEST
-                )
-            date_today = meal_in_progress[0].date
-            mealservice = MealService.objects.filter(
-                user=user, date=date_today
+        before_midday = Time.is_before_midday()
+        if user.is_tapped():
+            content['status'] = 'User has tapped in for {0}'.format(
+                'breakfast' if before_midday else 'lunch'
             )
+            return Response(content, status=status_code.HTTP_400_BAD_REQUEST)
 
-            if not mealservice.count():
-                mealservice = MealService()
-            else:
-                mealservice = mealservice[0]
+        date_today = MealSession.in_progress()[0].date
+        mealservice = MealService.objects.filter(user=user, date=date_today)
+        mealservice = MealService() if not mealservice.count() else  mealservice[0]
+        mealservice = mealservice.set_meal(before_midday)
+        mealservice = mealservice.set_user_and_date(user, date_today)
+        mealservice.save()
 
-            mealservice = mealservice.set_meal(before_midday)
-            mealservice = mealservice.set_user_and_date(user, date_today)
-            mealservice.save()
-
-            content['status'] = 'Tap was successful'
+        content['status'] = 'Tap was successful'
 
         return Response(content, status=status_code.HTTP_200_OK)
 
@@ -202,29 +183,21 @@ class UserViewSet(viewsets.ViewSet):
               type: string
               paramType: form
         """
-        before_midday = Time.is_before_midday()
         content = {}
-        meal_in_progress = MealSession.in_progress()
         timenow = timezone.now()
         user = get_object_or_404(self.queryset, pk=pk)
-        mealservice = MealService.objects.get(
-            user=user, date=meal_in_progress[0].date
-        )
+        mealservice = MealService.objects.get(user=user, date=MealSession.in_progress()[0].date)
         status = status_code.HTTP_200_OK
 
-        if not meal_in_progress:
+        if not MealSession.in_progress():
             content['status'] = 'There is no meal in progress'
         else:
-            mealservice = mealservice.set_meal(before_midday, reverse=True)
-            if not mealservice.untapped:
-                untapped = []
-            else:
-                untapped = json.loads(mealservice.untapped)
-            log = {
+            mealservice = mealservice.set_meal(Time.is_before_midday(), reverse=True)
+            untapped = [] if not mealservice.untapped else json.loads(mealservice.untapped)
+            untapped.append({
                 'date_untapped': str(timenow),
                 'user': request.passphrase.user.id
-            }
-            untapped.append(log)
+            })
             mealservice.untapped = untapped
             mealservice.date_modified = timenow
             mealservice.save()
@@ -270,10 +243,8 @@ class MealSessionViewSet(viewsets.ViewSet):
         before_midday = request.POST.get('before_midday')
         meal_in_progress = MealSession.in_progress()
         status = status_code.HTTP_200_OK
-        if before_midday:
-            content = {'status': 'Breakfast started'}
-        else:
-            content = {'lunch': 'Lunch started'}
+
+        content = {'status': 'Breakfast started'} if before_midday else {'lunch': 'Lunch started'}
 
         timezone.activate(pytz.timezone('Africa/Lagos'))
         time = timezone.now()
@@ -304,14 +275,10 @@ class MealSessionViewSet(viewsets.ViewSet):
               type: string
               paramType: form
         """
-        before_midday = request.POST.get('before_midday')
         meal_in_progress = MealSession.in_progress()
         status = status_code.HTTP_200_OK
 
-        if before_midday:
-            content = {'status': 'Breakfast stopped'}
-        else:
-            content = {'lunch': 'Lunch stopped'}
+        content = {'status': 'Breakfast stopped'} if request.POST.get('before_midday') else {'lunch': 'Lunch stopped'}
 
         if meal_in_progress:
             meal_in_progress[0].status = False
